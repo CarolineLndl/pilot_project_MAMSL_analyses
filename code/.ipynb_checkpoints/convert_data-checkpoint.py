@@ -131,18 +131,47 @@ class Convert_data:
                 
         return data_extracted, df
 
-    def filter_movement(self,dataframe,cutoff_frequency=10,fs=400):
-       
-        x_signal=dataframe["axis_raw_x"]
-        y_signal=dataframe["axis_raw_y"]
+    def filter_movement(self,dataframe,cutoff_frequency=10,fs=400,output_file=None):
+        '''
+        The filter_movement function is used to filter the data
+        Inputs
+        ----------
+        dataframe: pandas dataframe
+            input dataframe dataframe (9 columns)
+            
+        cutoff_frequency: int
+         lowpasss filter (default: 10)
+        
+        fs: int
+         the sampling frequency (default: 400)
+
+        Returns
+        ----------
+        data_extracted: pandas dataframe
+            input dataframe dataframe (10 columns), two new columns were added ("axis_filt_x","axis_filt_y")
+        '''
+        statesSignalX=dataframe["axis_states_x"]; statesSignalY=dataframe["axis_states_y"]
+        rawSignalX=dataframe["axis_raw_x"];rawSignalY=dataframe["axis_raw_y"]
+        
         # Design the Butterworth filter
         order = 4  # The order of the filter
         b, a = butter(order, cutoff_frequency, btype='low', analog=False,fs=fs)
 
         # Apply the filter to the signal
-        filtered_signal_x = filtfilt(b, a, x_signal)
-        filtered_signal_y = filtfilt(b, a, y_signal)
+        filteredStateSignal_x = filtfilt(b, a, statesSignalX)
+        filteredStateSignal_y  = filtfilt(b, a, statesSignalY)
+        filteredRawSignal_x = filtfilt(b, a,rawSignalX)
+        filteredRawSignal_y  = filtfilt(b, a, rawSignalY)
         
+        dataframe["axis_statesfilt_x"]=filteredStateSignal_x
+        dataframe["axis_statesfilt_y"]=filteredStateSignal_y
+        dataframe["axis_rawfilt_x"]=filteredRawSignal_x
+        dataframe["axis_rawfilt_y"]=filteredRawSignal_y
+        
+        if output_file != None:
+            dataframe.to_csv(output_file ,sep=',')
+            
+        return dataframe
             
 
     def plot_movement(self, subject_name, data_df=None,sample_rate=0.0025,save_plot=False,plot_filename=None):
@@ -170,15 +199,15 @@ class Convert_data:
         custom_params = {"axes.spines.right": False, "axes.spines.top": False}
         sns.set_theme(style="ticks",rc=custom_params)
 
-        sns.lineplot(x=data_df["sample"]*sample_rate,y="axis_raw_x",color='#2a9675', data=data_df,linewidth=2.5)
-        sns.lineplot(x=data_df["sample"]*sample_rate,y="axis_raw_y",color='#e3a32c', data=data_df,linewidth=2.5)
+        sns.lineplot(x=data_df["sample"]*sample_rate,y="axis_filt_x",color='#2a9675', data=data_df,linewidth=2.5)
+        sns.lineplot(x=data_df["sample"]*sample_rate,y="axis_filt_y",color='#e3a32c', data=data_df,linewidth=2.5)
 
         plt.ylabel('joystick position')
         plt.xlabel('time (in sec)')
 
         
-        custom_legend = [plt.Line2D([], [], color='#2a9675', label='x axis'),
-            plt.Line2D([], [], color='#e3a32c', label='y axis')]
+        custom_legend = [plt.Line2D([], [], color='#2a9675', label='x filter axis'),
+            plt.Line2D([], [], color='#e3a32c', label='y filter axis')]
 
         plt.legend(handles=custom_legend)
         
