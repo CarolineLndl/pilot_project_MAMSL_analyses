@@ -225,21 +225,23 @@ class Movement_analyses:
         movement_table.loc[:,"lineDev"]=[arr for arr in lineDev]
         
         # II. Extract the deviation for the max velocity ---------------------------------------------------
-        trial_table.loc[:,"lineDistance_vel"]=float('nan');trial_table.loc[:,"lineDistance_d100"]=float('nan')
-        trial_table.loc[:,"lineDev_vel"]=float('nan');trial_table.loc[:,"lineDev_d100"]=float('nan')
+        trial_table.loc[:,"lineDistance"]=float('nan')
+        trial_table.loc[:,"lineDev"]=float('nan')
         
         # Extract the maximal value (for the first 100 points) for each trial
-
+        value="d100"
         for idx, row in trial_table.iterrows(): # trial number
             # take the value at the max velocity
-            
-            maxVel=np.max(movement_table["velocityPow"][(movement_table["trial"]==row.trial)])
-            maxVelLoc=movement_table[(movement_table["trial"]==row.trial)].loc[movement_table["velocityPow"]==maxVel].index[0]                  
-            trial_table.loc[trial_table["trial"]==row.trial,"lineDistance_vel"]=np.mean(movement_table["lineDistance"][maxVelLoc-10:maxVelLoc+10])
-            trial_table.loc[trial_table["trial"]==row.trial,"lineDev_vel"]=np.mean(movement_table["lineDev"][maxVelLoc-10:maxVelLoc+10])
+            if value=="velocity":
+                maxVel=np.max(movement_table["velocityPow"][(movement_table["trial"]==row.trial)])
+                maxVelLoc=movement_table[(movement_table["trial"]==row.trial)].loc[movement_table["velocityPow"]==maxVel].index[0]                  
+                trial_table.loc[trial_table["trial"]==row.trial,"lineDistance"]=movement_table["lineDistance"][maxVelLoc]
+                trial_table.loc[trial_table["trial"]==row.trial,"lineDev"]=movement_table["lineDev"][maxVelLoc]
+                
             # take the mean value for the first 100 points
-            trial_table.loc[trial_table["trial"]==row.trial,"lineDistance_d100"]=np.mean(movement_table[(movement_table["trial"]==row.trial) & (movement_table["trial_samples"]<50)]["lineDistance"])
-            trial_table.loc[trial_table["trial"]==row.trial,"lineDev_d100"]=np.mean(movement_table[(movement_table["trial"]==row.trial) & (movement_table["trial_samples"]<50)]["lineDev"])
+            if value=="d100":
+                trial_table.loc[trial_table["trial"]==row.trial,"lineDistance"]=np.mean(movement_table[(movement_table["trial"]==row.trial) & (movement_table["trial_samples"]<50)]["lineDistance"])
+                trial_table.loc[trial_table["trial"]==row.trial,"lineDev"]=np.mean(movement_table[(movement_table["trial"]==row.trial) & (movement_table["trial_samples"]<50)]["lineDev"])
 
 
         return movement_table, trial_table

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import struct
 from scipy.signal import butter, filtfilt
-
+import cv2
 # plots---------------------------
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -50,7 +50,7 @@ class Convert_data:
 
             for sess_nb in range(0,len(self.config["list_subjects"][subject_name])):
                 sess=self.config["list_subjects"][subject_name]["sess0" + str(sess_nb+1)] # name of the session for that participant
-
+                
                 # Calibration files --------------------------------------
                 calib_card_files_raw=sorted(glob.glob(self.rawdata_dir  + "/"+ subject_name + "/sess0" + str(sess_nb+1) +"/calib*_cardinals.dat"))
                 calib_mvmnt_files_raw=sorted(glob.glob(self.rawdata_dir  + "/"+ subject_name + "/sess0" + str(sess_nb+1) +"/calib*_movements.dat"))
@@ -73,14 +73,17 @@ class Convert_data:
                 acq_mvmnt_files_raw=sorted(glob.glob(self.rawdata_dir  + "/"+ subject_name + "/sess0" + str(sess_nb+1) +"/sub*_movement.bin"))
                 acq_schedule_files_raw=sorted(glob.glob(self.rawdata_dir  + "/"+ subject_name + "/sess0" + str(sess_nb+1) +"/sub*_schedule.dat"))
                 acq_trials_files_raw=sorted(glob.glob(self.rawdata_dir  + "/"+ subject_name + "/sess0" + str(sess_nb+1) +"/sub*_trial.dat"))
-                
+
                 for file_nb in range(len(acq_mvmnt_files_raw)):
+                    
                     run_name=self.runs[subject_name]["sess0" + str(sess_nb+1)][file_nb]
                     acq_mvmnt_files=self.data_dir + "/" + subject_name + "/sess_"+ sess + "/" + run_name + "/" + subject_name + "_sess0"+str(sess_nb+1) + "_" + run_name +"_movement.bin"
                     acq_schedule_files=self.data_dir + "/" + subject_name + "/sess_"+ sess + "/" + run_name + "/" + subject_name + "_sess0"+str(sess_nb+1) + "_" + run_name +"_schedule.dat"
                     acq_trial_files=self.data_dir + "/" + subject_name + "/sess_"+ sess + "/" + run_name + "/" + subject_name+ "_sess0"+str(sess_nb+1) + "_" + run_name +"_trial.dat"
                     
                     if not os.path.exists(acq_mvmnt_files):
+                        print(acq_trials_files_raw[file_nb])
+                        print(run_name)
                         shutil.copy(acq_mvmnt_files_raw[file_nb],acq_mvmnt_files)
                         shutil.copy(acq_schedule_files_raw[file_nb],acq_schedule_files)
                         shutil.copy(acq_trials_files_raw[file_nb],acq_trial_files)
@@ -131,7 +134,104 @@ class Convert_data:
                 
         return data_extracted, df
 
-    def filter_movement(self,dataframe,cutoff_frequency=10,fs=400,output_file=None):
+    def plot_trial(self,subject_name,session_name,run_name,trial_range=None,plot_indiv=False,plot_targets=True,create_movie=True):
+        '''
+        Return the centered and scaled data, using the calibration file
+        Inputs
+        ----------
+        movement_file: string
+            filename    
+        '''
+        
+        # Plot movements
+        ana_dir=self.config["main_dir"] + self.config["data_dir"] + "/" + subject_name + "/sess_"+ session_name + "/" + run_name 
+        movement_filename=glob.glob(ana_dir + "/*_movement.csv")[0]
+        trial_filename=glob.glob(ana_dir + "/*_trial.dat")[0]
+        movement_data=pd.read_csv(movement_filename)
+
+        trial_data=pd.read_csv(trial_filename)
+        if trial_range==None:
+            trial_range=range(0,len(trial_data))
+        
+        
+        for trial in trial_range:
+            # if ==bloc:
+            plt.clf()
+
+
+            # plot movemenent location
+            self._plot_movement(movement_data,trial,col_tag="axis_statesfilt")
+            
+            if plot_targets==True:
+                # plot targets location
+                center = [0, 0]
+                targetdirections = [0, 90, -90, 180]
+                radius = .50
+                targetlocation = ([(radius * np.cos(np.pi * dir / 180)) for dir in targetdirections],
+                  [(radius * np.sin(np.pi * dir / 180)) for dir in targetdirections])
+                plt.plot(targetlocation[0], targetlocation[1], marker="o", linestyle="None", markersize=30,alpha=0.5)
+                plt.plot(center[0], center[1], marker="X", linestyle="None", markersize=10,alpha=0.5)
+                
+                            
+            if create_movie==True:
+                # save temporary plots for each trials
+                tmp_dir=ana_dir + "/tmp_images/"
+                if not os.path.exists(tmp_dir):
+                    os.mkdir(tmp_dir)
+                if trial<10:
+                    output_file=tmp_dir + "/tmp_trial_000" + str(trial) + ".png"
+                elif trial<100 and trial>9:
+                    output_file=tmp_dir + "/tmp_trial_00" + str(trial) + ".png"
+                elif trial<1000 and trial>99:
+                    output_file=tmp_dir + "/tmp_trial_0" + str(trial) + ".png"
+                    
+                else:
+                    output_file=tmp_dir + "/tmp_trial_" + str(trial) + ".png"
+                plt.savefig(output_file, dpi=60)
+        
+        if create_movie==True:
+            img_array=[]
+            for filename in sorted(glob.glob(tmp_dir + "tmp_trial*.png")):
+                img = cv2.imread(filename)
+                height, width, layers = img.shape
+                size = (width,height)
+                img_array.append(img)
+
+                movie_file=ana_dir +"/"+ subject_name + "_"+session_name+"_"+run_name + "_trials_movie.avi"
+                out = cv2.VideoWriter(movie_file,cv2.VideoWriter_fourcc(*'MJPG'), 5, size)
+                #out = cv2.VideoWriter(movie_file,cv2.VideoWriter_fourcc(*'X264'), 5, size)
+
+                for i in range(len(img_array)):
+                    out.write(img_array[i])
+                out.release()
+            shutil.rmtree(tmp_dir)
+            
+        
+    def _plot_movement(self,movement_data,trial,col_tag):
+        '''
+        The plot_movement function is used to plot x and y axis of the movement
+        Inputs
+        ----------
+        movement_data: dataframe
+            dataframme with different info about the movement recordings
+        trial: int
+            number of the trial to plot
+        col_tag: "string"
+            column selected in the dataframe for plotting
+        
+        '''
+        plt.plot(movement_data[col_tag+ "_x"][movement_data["trial"]==trial],movement_data[col_tag+"_y"][movement_data["trial"]==trial])
+        plt.scatter(movement_data[col_tag+ "_x"][movement_data["trial"]==trial][movement_data[col_tag+ "_x"][movement_data["trial"]==trial].index[0]],movement_data[col_tag+"_y"][movement_data["trial"]==trial][movement_data[col_tag+"_y"][movement_data["trial"]==trial].index[0]],marker='x', s=10,color="g") # plot the starting point in red
+        plt.scatter(movement_data[col_tag+ "_x"][movement_data["trial"]==trial][movement_data[col_tag+ "_x"][movement_data["trial"]==trial].index[-1]],movement_data[col_tag+"_y"][movement_data["trial"]==trial][movement_data[col_tag+"_y"][movement_data["trial"]==trial].index[-1]],marker='o', s=10,color="r") # plot the starting point in red
+        
+        plt.title('Trial ' + str(trial)) # plot title
+        plt.ylabel('Y-axis')
+        plt.xlabel('X-axis')
+        plt.xlim(-0.75,0.75)
+        plt.ylim(-0.75,0.75)
+    
+
+    def filter_movement(self,dataframe,cutoff_frequency=10,fs=1000,output_file=None):
         '''
         The filter_movement function is used to filter the data
         Inputs
@@ -143,7 +243,7 @@ class Convert_data:
          lowpasss filter (default: 10)
         
         fs: int
-         the sampling frequency (default: 400)
+         the sampling frequency (default: 1000)
 
         Returns
         ----------
@@ -154,7 +254,7 @@ class Convert_data:
         rawSignalX=dataframe["axis_raw_x"];rawSignalY=dataframe["axis_raw_y"]
         
         # Design the Butterworth filter
-        order = 4  # The order of the filter
+        order = 2  # The order of the filter
         b, a = butter(order, cutoff_frequency, btype='low', analog=False,fs=fs)
 
         # Apply the filter to the signal
@@ -174,52 +274,8 @@ class Convert_data:
         return dataframe
             
 
-    def plot_movement(self, subject_name, data_df=None,sample_rate=0.0025,save_plot=False,plot_filename=None):
-        '''
-        The plot_movement fucntion is used to plot x and y axis of the movement recordings
-        Inputs
-        ----------
-        subject_name: string
-            name of the participant
-        data_df: dataframe
-            data to read (.bin)
-        sample_rate: int
-            data sample rate (default=0.01)
-        
-        save_plot: bool
-            to save the plot as a png file (default=False)
-            
-        plot_filename: string
-            filename of the plot (default=None)
+
     
-        '''
-            
-        # Initiate
-        plt.figure(figsize=(15,6))
-        custom_params = {"axes.spines.right": False, "axes.spines.top": False}
-        sns.set_theme(style="ticks",rc=custom_params)
-
-        sns.lineplot(x=data_df["sample"]*sample_rate,y="axis_filt_x",color='#2a9675', data=data_df,linewidth=2.5)
-        sns.lineplot(x=data_df["sample"]*sample_rate,y="axis_filt_y",color='#e3a32c', data=data_df,linewidth=2.5)
-
-        plt.ylabel('joystick position')
-        plt.xlabel('time (in sec)')
-
-        
-        custom_legend = [plt.Line2D([], [], color='#2a9675', label='x filter axis'),
-            plt.Line2D([], [], color='#e3a32c', label='y filter axis')]
-
-        plt.legend(handles=custom_legend)
-        
-        if save_plot==True:
-            if plot_filename==None:
-                plot_filename=self.data_dir + "/" + subject_name + "_movement.png"
-                
-            else:
-                plot_filename=plot_filename
-
-            plt.savefig(plot_filename, dpi=300) 
-
 
                        
        
