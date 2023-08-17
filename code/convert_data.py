@@ -153,25 +153,25 @@ class Convert_data:
         if trial_range==None:
             trial_range=range(0,len(trial_data))
         
-        
+        increment = 0
         for trial in trial_range:
-            # if ==bloc:
+            
             plt.clf()
-
-
+            
             # plot movemenent location
-            self._plot_movement(movement_data,trial,col_tag="axis_statesfilt")
+            self._plot_movement(movement_data,trial,col_tag="axis_rotfilt")
             
             if plot_targets==True:
-                # plot targets location
+                rot_angle=0 # not necessary
+                
                 center = [0, 0]
                 targetdirections = [0, 90, -90, 180]
                 radius = .50
-                targetlocation = ([(radius * np.cos(np.pi * dir / 180)) for dir in targetdirections],
-                  [(radius * np.sin(np.pi * dir / 180)) for dir in targetdirections])
+                targetlocation = ([(radius * np.cos(np.pi * (dir-rot_angle) / 180)) for dir in targetdirections],
+                  [(radius * np.sin(np.pi * (dir-rot_angle) / 180)) for dir in targetdirections])
                 plt.plot(targetlocation[0], targetlocation[1], marker="o", linestyle="None", markersize=30,alpha=0.5)
                 plt.plot(center[0], center[1], marker="X", linestyle="None", markersize=10,alpha=0.5)
-                
+
                             
             if create_movie==True:
                 # save temporary plots for each trials
@@ -231,7 +231,7 @@ class Convert_data:
         plt.ylim(-0.75,0.75)
     
 
-    def filter_movement(self,dataframe,cutoff_frequency=10,fs=1000,output_file=None):
+    def filter_movement(self,dataframe,trial_file,run_name,cutoff_frequency=10,fs=1000,output_file=None):
         '''
         The filter_movement function is used to filter the data
         Inputs
@@ -239,6 +239,8 @@ class Convert_data:
         dataframe: pandas dataframe
             input dataframe dataframe (9 columns)
             
+        run_name: name of the run, if MA the rotation will be apply
+        
         cutoff_frequency: int
          lowpasss filter (default: 10)
         
@@ -268,14 +270,183 @@ class Convert_data:
         dataframe["axis_rawfilt_x"]=filteredRawSignal_x
         dataframe["axis_rawfilt_y"]=filteredRawSignal_y
         
-        if output_file != None:
-            dataframe.to_csv(output_file ,sep=',')
+        # Apply a column with unrotated movement for motor adaptation
+        dataframe=self._unrot_movement(dataframe,run_name)
+        
+        # Create a column with straighted movement
+        dataframe=self._straightened_movement(dataframe,trial_file,run_name)
+            
+        #if output_file != None:
+         #   dataframe.to_csv(output_file ,sep=',')
             
         return dataframe
             
-
-
-    
-
                        
+    def _unrot_movement(self,dataframe,run_name):
+        '''
+        For visualization and quantification, the perturbation should be applied back so the data looks like a normal pattern
+        
+        Inputs
+        ----------
+        dataframe: pandas dataframe
+            input dataframe dataframe (10 columns)
+            
+
+        '''
+        dataframe["rot_angle"]=0
        
+        # Rotation angle for motor adaptation task
+        rot_angles=[]
+        increment = 0
+        dataframe.loc[0,"trial"]=-1
+        dataframe["axis_rotfilt_x"]=dataframe["axis_statesfilt_x"]
+        dataframe["axis_rotfilt_y"]=dataframe["axis_statesfilt_y"]
+        # Incrementation of the rotation
+        for trial in dataframe.loc[dataframe["trial"]>=0,"trial"].unique(): # do not take into account the first row and trial -1
+            if run_name=="MA":
+                if trial <= 40: # 0 degree for the first 40 trials (5 sequences of 8 items)
+                    rot_angle = 0
+                    
+                elif trial >=1200:
+                    rot_angle = 30 # 30 degree for the last 15 blocks
+                
+                elif trial > 40 and trial < 1200: # increment of 1 degree of 40 to 1200 trials every half blocks (40 trials)
+                    if (trial - 41) % 40 == 0:
+                        increment += 1
+
+                    rot_angle = increment
+            else: 
+                rot_angle=0
+            
+            rot_angles.append(dataframe[dataframe["trial"]==trial]["rot_angle"]+rot_angle)
+        
+        rot_angles=np.concatenate(rot_angles)
+        dataframe.loc[dataframe["trial"]>=0, "rot_angle"]=rot_angles
+
+        # Apply the rotation to the movement
+        if run_name=="MA":
+            angle_radians=[];rot_x=[];rot_y=[]
+            for idx, row in dataframe.iterrows():
+                # Convert angle to radians
+                angle_radians.append(np.radians(dataframe.loc[idx, "rot_angle"]))
+
+                # Calculate new x and y positions after rotation
+
+                rot_x.append(dataframe.loc[idx, "axis_statesfilt_x"] * np.cos(angle_radians[idx]) - dataframe.loc[idx, "axis_statesfilt_y"] * np.sin(angle_radians[idx]))
+                rot_y.append(dataframe.loc[idx, "axis_statesfilt_x"] * np.sin(angle_radians[idx]) + dataframe.loc[idx, "axis_statesfilt_y"] * np.cos(angle_radians[idx]))
+
+            #rot_x=np.concatenate(rot_x);rot_x=np.concatenate(rot_y)
+            dataframe["axis_rotfilt_x"]=rot_x
+            dataframe["axis_rotfilt_y"]=rot_y
+        
+        return dataframe
+    
+    def _straightened_movement(self,dataframe_init,trial_file,run_name):
+        '''
+        For visualization and quantification, the movement will be rotated from the center of the screen to the top target so the data looks always like a similar pattern
+        
+        Inputs
+        ----------
+        dataframe: pandas dataframe
+            input dataframe dataframe (10 columns)
+            
+
+        '''
+            
+        # 1. Select trial to remove:
+        dataframe= dataframe_init.copy()
+        for idx, row in dataframe.iterrows():
+            if row.trial > 0 and row.trial < 1:
+                dataframe.loc[idx,"trial"]=-1
+        dataframe=dataframe[dataframe["trial"]>=0]
+        
+
+        # 2. Found the target angle
+        trial_df=pd.read_csv(trial_file,delimiter=" ")# read trial file
+        finalAngle=[]; # create empty array
+        initAngle=np.zeros((len(trial_df),1)) # create array with 0 values
+                                                                    
+        for idx, row in trial_df.iterrows():
+            finalAngle.append(row["target.angle"]) # define the initial target angle of the trial
+            if row.trial!=0:                     
+                initAngle[idx]=trial_df.loc[idx-1,"target.angle"] # define the final target angle of the trial
+        
+        finalAngle=np.array(finalAngle)
+        initAngle=np.concatenate(initAngle)
+
+
+
+        # 3. Rotate the mouvement
+        
+        for rot in [0,1]:
+            straightened_movement_X=[];straightened_movement_Y=[]
+            for idx, row in trial_df.iterrows():
+                sub_df=dataframe[dataframe["trial"]==row.trial] # select data from an entire trial
+
+
+                if rot==1:
+                    line_points_x=np.array(sub_df["axis_rotfilt_x"]) # x values for the selected trial
+                    line_points_y=np.array(sub_df["axis_rotfilt_y"]) # y values for the selected trial
+                elif rot==0:
+                    line_points_x=np.array(sub_df["axis_statesfilt_x"]) # x values for the selected trial
+                    line_points_y=np.array(sub_df["axis_statesfilt_y"]) # y values for the selected trial
+
+                #Step 1. Translation to move initial point to the origin
+                translated_pts = [line_points_x - line_points_x[0],line_points_y - line_points_y[0]]
+
+                # Step 2: Apply a rotation angle
+                angle1=initAngle[idx]
+                angle2=finalAngle[idx]
+                if (angle1 == 0 and angle2 == -90) or (angle1 == 90 and angle2 == 180):
+                    rotation_angle = -135; flip=-1
+                elif (angle1 == 180 and angle2 == -90) or (angle1 == 90 and angle2 == 0):
+                    rotation_angle = 135; flip=1
+                elif (angle1 == -90 and angle2 == 90):
+                    rotation_angle = 0; flip=1
+                elif (angle1 == 90 and angle2 == -90):
+                    rotation_angle = 180; flip=1
+                elif (angle1 == 0 and angle2 == 180):
+                    rotation_angle = -90; flip=1
+                elif (angle1 == 180 and angle2 == 0):
+                    rotation_angle = 90
+                elif (angle1 == 0 and angle2 == 90) or (angle1 == -90 and angle2 == 180):
+                    rotation_angle = -45; flip=-1
+                elif (angle1 == 180 and angle2 == 90) or (angle1 == -90 and angle2 == 0):
+                    rotation_angle = 45; flip=1
+                elif (angle1 == 0 and angle2 == 0):
+                    rotation_angle=90; flip=1
+
+                else:
+                    rotation_angle=0
+
+
+                rotation_matrix = np.array([[np.cos(np.radians(rotation_angle )), -np.sin(np.radians(rotation_angle ))],
+                                [np.sin(np.radians(rotation_angle )), np.cos(np.radians(rotation_angle ))]])
+
+                # Apply rotation to each point
+
+                rotated_pts = np.dot(rotation_matrix, translated_pts)
+
+
+                straightened_movement_X.append(rotated_pts[0]*flip) # put all arraysin the same big array
+                straightened_movement_Y.append(rotated_pts[1]) # put all arraysin the same big array
+
+            straightened_movement_X=np.hstack(straightened_movement_X) # concatenate in an unique array
+            straightened_movement_Y=np.hstack(straightened_movement_Y) # concatenate in an unique array
+
+
+            if rot==1:
+                dataframe.loc[:,"straightened_rotmvmnt_X"]=float('nan');dataframe.loc[:,"straightened_rotmvmnt_Y"]=float('nan')
+                dataframe.loc[:,"straightened_rotmvmnt_X"]=straightened_movement_X;dataframe.loc[:,"straightened_rotmvmnt_Y"]=straightened_movement_Y
+
+            elif rot==0:
+                dataframe.loc[:,"straightened_mvmnt_X"]=float('nan');dataframe.loc[:,"straightened_mvmnt_Y"]=float('nan')
+                dataframe.loc[:,"straightened_mvmnt_X"]=straightened_movement_X;dataframe.loc[:,"straightened_mvmnt_Y"]=straightened_movement_Y
+
+        return dataframe
+        
+        
+
+
+        
+        

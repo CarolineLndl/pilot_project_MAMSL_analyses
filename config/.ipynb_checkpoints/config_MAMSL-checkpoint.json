@@ -2,7 +2,7 @@
 "rawdata_dir":"/rawdata/",
 "data_dir":"/derivatives/data/",
 
-"session_names":["MSL"],
+"session_names":["MA"],
 "session_nb":["sess01"],
 
 "templates":{"spinalcord":" ",
@@ -13,6 +13,6 @@
              "sct_toolbox":"/cerebro/cerebro1/dataset/bmpd/derivatives/thibault_test/code/toolbox/spinalcordtoolbox-5.0.0",
             "spm_dir":"/cerebro/cerebro1/dataset/bmpd/derivatives/thibault_test/code/toolbox/spm12/"},
 
-"list_subjects":{"sub-014":{"sess01":"MSL"}},
- 
-"subjects_acq":{"sub-014":{"sess01":["fam1","fam2","RNDpre","MSL","RNDpost"]}}}
+"list_subjects":{"sub-010":{"sess01":"MA"}},
+
+"subjects_acq":{"sub-010":{"sess01":["fam1","fam2","RNDpre","MA","RNDpost"]}}}

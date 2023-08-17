@@ -3,7 +3,7 @@ import os, glob
 import numpy as np
 import pandas as pd
 import math
-
+from scipy.stats import linregress
 
 # plots---------------------------
 #import matplotlib.pyplot as plt
@@ -54,7 +54,7 @@ class Movement_analyses:
                 for run_name in self.runs[subject_name]["sess0" + str(sess_nb+1)]:
                     print(run_name)
                     self.movement_data[subject_name][sess][run_name]=glob.glob(self.data_dir + "/" + subject_name +  "/sess_" + sess  + "/" + run_name +"/*movement.csv")[0]
-                    self.trial_data[subject_name][sess][run_name]=glob.glob(self.data_dir + "/" + subject_name +  "/sess_" + sess  + "/" + run_name +"/*trial.dat")[0]
+                    self.trial_data[subject_name][sess][run_name]=glob.glob(self.data_dir + "/" + subject_name +  "/sess_" + sess  + "/" + run_name +"/*trialfilter.csv")[0]
         
                                    
    
@@ -69,7 +69,7 @@ class Movement_analyses:
                 self.calib_table[subject_name][sess]=pd.read_table(self.calib_data[subject_name][sess],delimiter=" ")
                 for run_name in self.runs[subject_name]["sess0" + str(sess_nb+1)]:
                     self.movement_table[subject_name][sess][run_name]=pd.read_table(self.movement_data[subject_name][sess][run_name],delimiter=",")
-                    self.trial_table[subject_name][sess][run_name]=pd.read_table(self.trial_data[subject_name][sess][run_name],delimiter=" ")
+                    self.trial_table[subject_name][sess][run_name]=pd.read_table(self.trial_data[subject_name][sess][run_name],delimiter=",")
         
         return self.calib_table, self.movement_table, self.trial_table
     
@@ -124,7 +124,7 @@ class Movement_analyses:
 
                 
         trial_table["run_name"]=run_name
-        trial_table=trial_table[["subject","run_name","block","blockRun","seqRun","seq_nb","trial","target.angle","t.move","t.hit"]] # select subset of the main table
+       
     
     
         trial_samples=np.concatenate(trial_samples_nb) # catenate the values
@@ -132,19 +132,34 @@ class Movement_analyses:
         
         movement_table.loc[:,"trial_samples"]=[arr for arr in trial_samples] # add trial simple info in the main table
         
-        movement_table=movement_table[["sample","trial","trial_samples","t_since_start","axis_statesfilt_x","axis_statesfilt_y"]] # select subset of the main table
+        movement_table=movement_table[["sample","trial","trial_samples","t_since_start","axis_rotfilt_x","axis_rotfilt_y"]] # select subset of the main table
+        trial_table=trial_table[["subject","run_name","block","blockRun","seqRun","seq_nb","trial","remove_seq","seqInBlock","trialInSeq","target.angle","t.move","t.hit"]] # select subset of the main table
         
         
         #b. calculate the velocity power
         movement_table.loc[:,"velocity"]=0; movement_table.loc[:,"velocityPow"]=0 ;
        
-        velPower = np.sqrt(pow(np.gradient(movement_table["axis_statesfilt_x"]), 2) + pow(np.gradient(movement_table["axis_statesfilt_y"]), 2))
-        vel=np.sqrt((np.gradient(movement_table["axis_statesfilt_x"])) + np.gradient(movement_table["axis_statesfilt_y"]))
+        velPower = np.sqrt(pow(np.gradient(movement_table["axis_rotfilt_x"]), 2) + pow(np.gradient(movement_table["axis_rotfilt_y"]), 2))
+        
+        #c. Calculate velocity
+        #vel=np.sqrt((np.gradient(movement_table["axis_rotfilt_x"])) + np.gradient(movement_table["axis_rotfilt_y"])) # old version
+
+        # Check for NaN and zero values before performing division
+        valid_indices = np.logical_and(~np.isnan(np.gradient(movement_table["axis_rotfilt_x"])), ~np.isnan(np.gradient(movement_table["axis_rotfilt_y"])))
+        valid_indices = np.logical_and(valid_indices, ~np.isclose(np.gradient(movement_table["axis_rotfilt_x"]), 0))
+        valid_indices = np.logical_and(valid_indices, ~np.isclose(np.gradient(movement_table["axis_rotfilt_y"]), 0))
+
+        # Calculate velocity only for valid indices
+        vel = np.zeros_like(np.gradient(movement_table["axis_rotfilt_x"]))
+        vel[valid_indices] = np.sqrt(movement_table["axis_rotfilt_x"][valid_indices] ** 2 + movement_table["axis_rotfilt_y"][valid_indices] ** 2)
+
+
+        
         movement_table.loc[:,"velocity"]=vel;movement_table.loc[:,"velocityPow"]=velPower
         
         
         if reachLine==True:
-            movement_table,trial_table=self._reachLine(movement_table,trial_table,line2reach="mvmntPos")
+            movement_table,trial_table=self._reachLine(movement_table,trial_table,run_name,line2reach="targetPos")
 
             
         if kinematics==True:
@@ -153,7 +168,7 @@ class Movement_analyses:
         return movement_table,trial_table
 
     
-    def _reachLine(self,movement_table,trial_table,line2reach="mvmntPos"):
+    def _reachLine(self,movement_table,trial_table,run_name,line2reach="targetPos"):
         '''
         Calculate the shorter line between the start and the end of the movement
         
@@ -165,31 +180,36 @@ class Movement_analyses:
         
         '''
         
-        line2Reach = [];
+        line2Reach = [];lineVel=[]
         # I. Calculate the line to reach --------------------------------------------------------------------
         for idx, row in trial_table.iterrows():
-            
+
             #Case1: The line will be drawn beween 2 targets position
             if line2reach=="targetPos":
-                if row.trial==0:
-                    # target position for initial target (the previous one)
-                    initTargPosX=0
-                    initTargPosY=0
+
+                rot_angle=0 # not use
+                    
+                if row.seqInBlock==0 and row.trialInSeq==0:
+                    # target position for initial target, the first of each bloc
+                    initTargPosX=0+rot_angle
+                    initTargPosY=0+rot_angle
                 
                 else:
-                    initTarg=trial_table["target.angle"][row.trial-1] # Target degree:
+                    initTarg=trial_table["target.angle"][row.trial-1]-rot_angle # Target degree - rotation angle (0 if not MA)
+
                     initTargPosX,initTargPosY=self._targetPosition(initTarg)# target position
-                actualTarg=trial_table["target.angle"][row.trial] # Target degree
+                    
+                actualTarg=trial_table["target.angle"][row.trial]-rot_angle # Target degree
                 actualTargPosX,actualTargPosY=self._targetPosition(actualTarg)
                           
             # Case2: the line will be drawn beween initial and final movement position
-            if line2reach=="mvmntPos":
-                index_init=movement_table[movement_table["trial"]==trial_table["trial"][idx]].index[0]
-                initTargPosX=movement_table["axis_statesfilt_x"][index_init]
-                initTargPosY=movement_table["axis_statesfilt_y"][index_init]
-                index_actual=movement_table[movement_table["trial"]==trial_table["trial"][idx]].index[-1]
-                actualTargPosX=movement_table["axis_statesfilt_x"][index_actual]
-                actualTargPosY=movement_table["axis_statesfilt_y"][index_actual]
+            #elif line2reach=="mvmntPos":
+             #   index_init=movement_table[movement_table["trial"]==trial_table["trial"][idx]].index[0]
+              #  initTargPosX=movement_table["axis_statesfilt_x"][index_init]
+               # initTargPosY=movement_table["axis_statesfilt_y"][index_init]
+                #index_actual=movement_table[movement_table["trial"]==trial_table["trial"][idx]].index[-1]
+                #actualTargPosX=movement_table["axis_statesfilt_x"][index_actual]
+                #actualTargPosY=movement_table["axis_statesfilt_y"][index_actual]
                       
                 
             # number of sample for the trial
@@ -199,34 +219,54 @@ class Movement_analyses:
             # Generate the line points
             line_points = self._linePoints([initTargPosX,initTargPosY],[actualTargPosX,actualTargPosY], trial_sample)
             line2Reach.append(line_points)
- 
+            
+            # Calculate the line between the initial joystik position and final position
+            iniLoc=movement_table[(movement_table["trial"]==row.trial)].index[0]# initial point
+            endLoc=movement_table[(movement_table["trial"]==row.trial)].index[-1]# final point
+
+            initPosX=movement_table["axis_rotfilt_x"][iniLoc];initPosY=movement_table["axis_rotfilt_y"][iniLoc]
+            endPosX=movement_table["axis_rotfilt_x"][endLoc]; endPosY=movement_table["axis_rotfilt_y"][endLoc]
+            
+            line_points = self._linePoints([initPosX,initPosY],[endPosX,endPosY], trial_sample)
+            lineVel.append(line_points)
+
+        
         line2ReachConcat=np.concatenate(line2Reach) # concatenate all line2Reach list in an array
+        lineVelConcat=np.concatenate(lineVel) # concatenate all line2Reach list in an array
         
         #Copy the results in the main table
         movement_table.loc[:,"line2Reach_X"]=float('nan') ; movement_table.loc[:,"line2Reach_Y"]=float('nan');
+        movement_table.loc[:,"lineVel_X"]=float('nan') ; movement_table.loc[:,"lineVel_Y"]=float('nan');
+        
         movement_table.loc[:, "line2Reach_X"] = [arr[0] for arr in line2ReachConcat]
         movement_table.loc[:, "line2Reach_Y"] = [arr[1] for arr in line2ReachConcat]
-
-       
+        movement_table.loc[:, "lineVel_X"] = [arr[0] for arr in lineVelConcat]
+        movement_table.loc[:, "lineVel_Y"] = [arr[1] for arr in lineVelConcat]
+        
         
         # II. Calculate the deviation between the actual movement and theline to reach ---------------------------------------------------
         lineDistance=[];lineDev=[]
-        for idx, row in movement_table.iterrows():
-            if row.trial>=0 and idx>0:
-                reachAngs=trial_table["target.angle"][row.trial]
-            else:
-                reachAngs=[np.nan]
+        for idx, row in trial_table.iterrows():
             
-            distance,dev=self._lineDev(movement_table["axis_statesfilt_x"][idx],movement_table["axis_statesfilt_y"][idx],movement_table["line2Reach_X"][idx],movement_table["line2Reach_Y"][idx],reachAngs)
-            lineDistance.append(distance)
-            lineDev.append(dev)
+            reachAngs=trial_table["target.angle"][row.trial]
+                   
+            #distance,dev=self._lineDev(movement_table["lineVel_X"][idx],movement_table["lineVel_Y"][idx],movement_table["line2Reach_X"][idx],movement_table["line2Reach_Y"][idx],reachAngs)
+            angDev=self._lineDev(movement_table["axis_rotfilt_x"][movement_table["trial"]==row.trial],movement_table["axis_rotfilt_y"][movement_table["trial"]==row.trial],movement_table["line2Reach_X"][movement_table["trial"]==row.trial],movement_table["line2Reach_Y"][movement_table["trial"]==row.trial])
+            
+            #lineDistance.append(distance)
+            lineDev.append(angDev)
+
+        
+        lineDevConcat=np.hstack(lineDev).reshape(-1, 1)
+
         movement_table.loc[:,"lineDistance"]=float('nan') ; movement_table.loc[:,"lineDev"]=float('nan');
-        movement_table.loc[:,"lineDistance"]=[arr[0] for arr in lineDistance]
-        movement_table.loc[:,"lineDev"]=[arr for arr in lineDev]
+
+        #movement_table.loc[:,"lineDistance"]=[arr[0] for arr in lineDistance]
+        movement_table.loc[:,"lineDev"]=lineDevConcat#[arr for arr in lineDev]
         
         # II. Extract the deviation for the max velocity ---------------------------------------------------
-        trial_table.loc[:,"lineDistance_vel"]=float('nan');trial_table.loc[:,"lineDistance_d100"]=float('nan')
-        trial_table.loc[:,"lineDev_vel"]=float('nan');trial_table.loc[:,"lineDev_d100"]=float('nan')
+        #trial_table.loc[:,"lineDistance_vel"]=float('nan');trial_table.loc[:,"lineDistance"]=float('nan')
+        trial_table.loc[:,"lineDev_vel"]=float('nan');trial_table.loc[:,"lineDev"]=float('nan');
         
         # Extract the maximal value (for the first 100 points) for each trial
 
@@ -235,13 +275,15 @@ class Movement_analyses:
             
             maxVel=np.max(movement_table["velocityPow"][(movement_table["trial"]==row.trial)])
             maxVelLoc=movement_table[(movement_table["trial"]==row.trial)].loc[movement_table["velocityPow"]==maxVel].index[0]                  
-            trial_table.loc[trial_table["trial"]==row.trial,"lineDistance_vel"]=np.mean(movement_table["lineDistance"][maxVelLoc-10:maxVelLoc+10])
-            trial_table.loc[trial_table["trial"]==row.trial,"lineDev_vel"]=np.mean(movement_table["lineDev"][maxVelLoc-10:maxVelLoc+10])
+            #trial_table.loc[trial_table["trial"]==row.trial,"lineDistance_vel"]=np.mean(movement_table["lineDistance"][maxVelLoc-50:maxVelLoc+50])
+            trial_table.loc[trial_table["trial"]==row.trial,"lineDev_vel"]=np.mean(movement_table["lineDev"][maxVelLoc-5:maxVelLoc+5])
+            
+           
+            
             # take the mean value for the first 100 points
-            trial_table.loc[trial_table["trial"]==row.trial,"lineDistance_d100"]=np.mean(movement_table[(movement_table["trial"]==row.trial) & (movement_table["trial_samples"]<50)]["lineDistance"])
-            trial_table.loc[trial_table["trial"]==row.trial,"lineDev_d100"]=np.mean(movement_table[(movement_table["trial"]==row.trial) & (movement_table["trial_samples"]<50)]["lineDev"])
-
-
+            #trial_table.loc[trial_table["trial"]==row.trial,"lineDistance"]=np.mean(movement_table[(movement_table["trial"]==row.trial) & (movement_table["trial_samples"])]["lineDistance"])
+            trial_table.loc[trial_table["trial"]==row.trial,"lineDev"]=np.mean(movement_table[(movement_table["trial"]==row.trial)]["lineDev"])
+            
         return movement_table, trial_table
     
     
@@ -251,9 +293,11 @@ class Movement_analyses:
         
         perpDist_all=[];dirDist_all=[];area_all=[]
         for idx, row in trial_table.iterrows():
-            ang2Reach=trial_table["target.angle"][row.trial]# extract target position in degree 
-            axisX=np.array(movement_table["axis_statesfilt_x"][movement_table["trial"]==row.trial])
-            axisY=np.array(movement_table["axis_statesfilt_x"][movement_table["trial"]==row.trial])
+            rot_angle=0 # not use
+            
+            ang2Reach=trial_table["target.angle"][row.trial]-rot_angle# extract target position in degree 
+            axisX=np.array(movement_table["axis_rotfilt_x"][movement_table["trial"]==row.trial])
+            axisY=np.array(movement_table["axis_rotfilt_y"][movement_table["trial"]==row.trial])
             acqTime=np.array(movement_table["t_since_start"][movement_table["trial"]==row.trial])
             perpDist,dirDist,area =self._kin_charsigned(axisX,axisY,acqTime,ang2Reach)
             
@@ -357,7 +401,7 @@ class Movement_analyses:
         t_iadend = iad[-1]     # The initial deviation, end of the movement
         t_meanpd = np.mean(pd)
 
-        return abs(pd),abs(dd),abs(area)
+        return pd,dd,area
     
     #return angular devition for a signle raw
     def _angleDevCalc(self,cursorPosX,cursorPosY, Ang2Reach):
@@ -365,6 +409,7 @@ class Movement_analyses:
 
     # return to target position     
     def _targetPosition(self,targetAngleDegree):
+        
         radius = .50
         target_posX=radius * np.cos(np.pi * targetAngleDegree / 180)
         target_posY=radius * np.sin(np.pi * targetAngleDegree / 180)
@@ -372,17 +417,47 @@ class Movement_analyses:
 
         return target_posX, target_posY
 
-    def _lineDev(self,posX,posY,line2reachX,line2reachY,Ang2Reach):
+    def _lineDev(self,posX,posY,line2reachX,line2reachY):
+
+        # Fit a linear model to the data using least squares (y = mx + b)
+        # Get the slopes and intercepts of the fitted lines
+        #slope_line1, intercept_line1, r_value1, p_value1, std_err1 = linregress(posX, posY)
+        #slope_line2, intercept_line2, r_value2, p_value2, std_err2 = linregress(line2reachX, line2reachY)
+
+
+        # Calculate the angles (in degrees) of the slopes
+        #angle_line1 = np.degrees(np.arctan(slope_line1))
+        #angle_line2 = np.degrees(np.arctan(slope_line2))
+
+        # Calculate the difference in angles
+        #lineDev = angle_line1 - angle_line2
+
 
         # Calculate the x and y increments between the line2reach and the actual movement
         delta_x = posX - line2reachX
         delta_y = posY - line2reachY
 
-        lineDistance=[abs(delta_x),abs(delta_y)] # x and y distance between the two lines
-        lineDev=abs(math.degrees(math.atan2(posX, posY))-math.degrees(math.atan2(line2reachX, line2reachY)))# deviation in degree
+        #lineDistance=[abs(delta_x),abs(delta_y)] # x and y distance between the two lines
+        
+        #angle1 = math.degrees(math.atan2(posX, posY))
+        
+        angular_deviations=[]
+        for x1, y1, x2, y2 in zip(line2reachX, line2reachY, posX, posY):
+            angle1 = math.atan2(x1,y1)
+            angle2 = math.atan2(x2,y2)
+            angular_deviation = np.degrees((angle1 - angle2))
+            angular_deviations.append(angular_deviation)
+
+            
+        #angle2 = math.degrees(math.atan2(line2reachX, line2reachY))
+        #angular_deviation = abs(angle1 - angle2)
+        #angular_deviations.append(angular_deviation)
+    
+    
+        #lineDev=abs(math.degrees(math.atan2(posX, posY))-math.degrees(math.atan2(line2reachX, line2reachY)))# deviation in degree
 
 
-        return lineDistance,lineDev
+        return angular_deviations
 
     def _linePoints(self,posStart,posEnd, sampleSize):
         # Calculate the x and y increments
