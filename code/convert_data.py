@@ -276,8 +276,8 @@ class Convert_data:
         # Create a column with straighted movement
         dataframe=self._straightened_movement(dataframe,trial_file,run_name)
             
-        #if output_file != None:
-         #   dataframe.to_csv(output_file ,sep=',')
+        if output_file != None:
+            dataframe.to_csv(output_file ,sep=',')
             
         return dataframe
             
@@ -395,26 +395,38 @@ class Convert_data:
                 translated_pts = [line_points_x - line_points_x[0],line_points_y - line_points_y[0]]
 
                 # Step 2: Apply a rotation angle
-                angle1=initAngle[idx]
+                if (row.trialInSeq ==0) and (row.seqInBlock ==0):
+                    if finalAngle[idx] ==180:
+                        angle1=0
+                    elif finalAngle[idx] ==90:
+                        angle1=-90
+                    elif finalAngle[idx] ==0:
+                        angle1=180
+                    elif finalAngle[idx] ==-90:
+                        angle1=90
+                        
+                else:
+                    angle1=initAngle[idx]
+                    
                 angle2=finalAngle[idx]
                 if (angle1 == 0 and angle2 == -90) or (angle1 == 90 and angle2 == 180):
-                    rotation_angle = -135; flip=-1
+                    rotation_angle = -135
                 elif (angle1 == 180 and angle2 == -90) or (angle1 == 90 and angle2 == 0):
-                    rotation_angle = 135; flip=1
+                    rotation_angle = 135
                 elif (angle1 == -90 and angle2 == 90):
-                    rotation_angle = 0; flip=1
+                    rotation_angle = 0
                 elif (angle1 == 90 and angle2 == -90):
-                    rotation_angle = 180; flip=1
+                    rotation_angle = 180
                 elif (angle1 == 0 and angle2 == 180):
-                    rotation_angle = -90; flip=1
+                    rotation_angle = -90
                 elif (angle1 == 180 and angle2 == 0):
                     rotation_angle = 90
                 elif (angle1 == 0 and angle2 == 90) or (angle1 == -90 and angle2 == 180):
-                    rotation_angle = -45; flip=-1
+                    rotation_angle = -45
                 elif (angle1 == 180 and angle2 == 90) or (angle1 == -90 and angle2 == 0):
-                    rotation_angle = 45; flip=1
+                    rotation_angle = 45
                 elif (angle1 == 0 and angle2 == 0):
-                    rotation_angle=90; flip=1
+                    rotation_angle=90
 
                 else:
                     rotation_angle=0
@@ -428,7 +440,7 @@ class Convert_data:
                 rotated_pts = np.dot(rotation_matrix, translated_pts)
 
 
-                straightened_movement_X.append(rotated_pts[0]*flip) # put all arraysin the same big array
+                straightened_movement_X.append(rotated_pts[0]) # put all arraysin the same big array
                 straightened_movement_Y.append(rotated_pts[1]) # put all arraysin the same big array
 
             straightened_movement_X=np.hstack(straightened_movement_X) # concatenate in an unique array

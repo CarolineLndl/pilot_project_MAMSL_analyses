@@ -13,6 +13,6 @@
              "sct_toolbox":"/cerebro/cerebro1/dataset/bmpd/derivatives/thibault_test/code/toolbox/spinalcordtoolbox-5.0.0",
             "spm_dir":"/cerebro/cerebro1/dataset/bmpd/derivatives/thibault_test/code/toolbox/spm12/"},
 
-"list_subjects":{"sub-009":{"sess01":"MA"}},
+"list_subjects":{"sub-016":{"sess01":"MA"}},
 
-"subjects_acq":{"sub-009":{"sess01":["fam1","fam2","RNDpre","MA","RNDpost"]}}}
+"subjects_acq":{"sub-016":{"sess01":["fam1","fam2","RNDpre","MA","RNDpost"]}}}
